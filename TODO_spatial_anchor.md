@@ -444,9 +444,10 @@ App 启动
 
 ### T9｜构建与发布 ✅
 
-#### T9.1 Quest APK（`alvr.client.lynx`）
+#### T9.1 Quest APK（`alvr.client.lbestreaming`）
 
-- [x] 包名 `alvr.client.lynx`，标签 `ALVR_Lynx`，与 Meta 商店版共存
+- [x] 包名 `alvr.client.lbestreaming`，标签/应用名 `LBEStreaming`，与 Meta 商店版共存
+      （2026-06-23 由 `alvr.client.lynx`/`ALVR_Lynx` 改名；OpenXR application_name 同步）
 - [x] `cargo xtask package-client --ci`（需 `ANDROID_NDK_ROOT`；`Git\usr\bin` 放 PATH 末尾提供 unzip）
 - [x] `adb install -r target/distribution/apk/alvr_client_openxr.apk`
 
@@ -464,7 +465,28 @@ App 启动
 |------|------|------|
 | 9943 | TCP | ALVR 握手 |
 | 9944 | UDP | ALVR 视频流（不可占用） |
-| 9945 | UDP | 锚点 Pull 服务（本项目） |
+| 9945 | UDP | 锚点 Pull 服务（**PC 端 `127.0.0.1`**，T6 迁移后） |
+
+---
+
+### T10｜LBE 部署 / 分发 ✅（2026-06-23）
+
+> 面向多场地、多头显、**离线**运营。每场地一台 PC、一份场地专属 `anchor_config`。
+
+- [x] **应用改名 LBEStreaming**：头显包名 `alvr.client.lbestreaming`/标签 LBEStreaming；
+      PC 窗口标题 + 侧栏(加宽至 210) + dashboard exe 改名 `LBEStreaming.exe`。
+- [x] **PC 默认设置**（仅对新建 session 生效）：Recentering=**Stage**、**自动随 dashboard 开关 SteamVR**、
+      Resolution=**Very Low**(width 1536)。
+- [x] **配对 = 手动 Trust**（不改代码）：关掉 `auto_trust_clients`(debug 默认 true→自动连一切)，
+      在 Devices 页对每台 PC 只 Trust 本工位头显。信任记录存 streamer 目录 `session.json`(便携布局)。
+- [x] **anchor_config 外部存储**：`set_storage_dir` 把 `anchor_config.json` 改存 app 外部文件目录
+      `/sdcard/Android/data/<pkg>/files/`，使 adb 可 push/pull（私有内部目录非 debuggable 包够不到）。
+- [x] **离线 adb**：`platform-tools` 放进 streamer 目录（`local_adb_exe` 命中,ALVR 自身也不再联网下载）。
+      运营机零 SDK,整目录离线可用。Quest 开发者模式需一次性联网开启。
+- [x] **分发脚本**（streamer 目录 + `scripts/`）：`pull_anchor_config.ps1`(母机→PC)、
+      `push_anchor_config.ps1`(PC→所有已装 LBEStreaming 的头显,自动跳过未装)。自带 adb 定位。
+- [x] ✅ 实机验证(2026-06-23)：APK 装机、外部目录读写、push/pull 往返、UE 从 `127.0.0.1:9945` 收到 anchor 全通。
+- ⚠ **协议变更**：T6 加了 `AnchorUpdate` 控制包 → 定制 APK 与定制 streamer 须**同步重建**。
 
 ---
 
@@ -479,9 +501,12 @@ App 启动
 | `alvr/client_openxr/src/camera.rs` | 新建 ✅ | PCA 桥 + ArUco 检测 + `disambiguate_corners` + PnP（替代废弃的 qr_anchor.rs） |
 | `alvr/client_openxr/src/aruco_dict_4x4.rs` | 新建 ✅ | DICT_4X4_250 码表 |
 | `alvr/client_openxr/src/qr_pose.rs` | 新建 ✅ | 4 点平面 PnP（homography 分解） |
-| `alvr/client_core/src/anchor_service.rs` | 新建 ✅ | UDP Pull 响应服务（9945） |
-| `alvr/client_core/src/anchor_config.rs` | 新建 ✅ | `AnchorConfig` 持久化（主 marker + 原点 offset + 辅助 offsets）→ `anchor_config.json` |
-| `alvr/client_openxr/Cargo.toml` | 修改 ✅ | 包名 `alvr.client.lynx` |
+| `alvr/client_core/src/anchor_service.rs` | 新建 ✅ | T6 迁移后＝头显端「最新原点+dirty」缓存（push-on-change） |
+| `alvr/server_core/src/anchor_service.rs` | 新建 ✅ | **PC 端**锚点缓存 + 落盘 `anchor_cache.json` + `127.0.0.1:9945` 响应器（T6 迁移） |
+| `alvr/client_core/src/anchor_config.rs` | 新建 ✅ | `AnchorConfig` 持久化 → `anchor_config.json`（**外部存储**，`set_storage_dir`，供 adb 分发） |
+| `alvr/packets/src/lib.rs` | 修改 ✅ | `ClientControlPacket::AnchorUpdate{uuid,pose}`（T6 头显→PC 推送） |
+| `scripts/pull_anchor_config.ps1` / `push_anchor_config.ps1` | 新建 ✅ | 离线 adb 配置分发（T10） |
+| `alvr/client_openxr/Cargo.toml` | 修改 ✅ | 包名 `alvr.client.lbestreaming` |
 | `UEPlugin/QuestAnchorReceive/` | 新建 ✅ | UE 插件（Pull + Blueprint API） |
 | `alvr/Aruco/` | 资源 ✅ | 现成可打印 DICT_4X4 码（PDF，A0-A4，id 自带尺寸） |
 | `build/gen_4x4_codes.py` | 新建 ✅ | 从 OpenCV 提取 DICT_4X4 码表生成 `aruco_dict_4x4.rs` |
@@ -517,9 +542,13 @@ App 启动
 - ✅ APK `alvr.client.lynx` 与 Meta 商店版共存，正常启动
 - ✅ 源码编译 PC Streamer（v21-dev13），与 APK 握手连接成功
 - ✅ T6 端到端：Quest↔PC:9945 UDP Pull 通；UE 插件去重/超时/三态回调
+- ✅ **T6 迁移 + T10 部署（2026-06-23）**：anchor 服务搬到 PC（头显经控制通道 `AnchorUpdate` 推送 →
+  PC 缓存+落盘 `anchor_cache.json` → `127.0.0.1:9945` 响应）；**UE 从 localhost 端到端收到 anchor**。
+  LBEStreaming 改名、PC 默认设置、anchor_config 外部存储 + 离线 adb + 分发脚本全部实机验证通过。
 - ✅ T0 UI 框架：阶段机、射线（控制器+手势）、实心按钮、坐标系线段渲染
 - ✅ PC Streamer 发行包 + QR 打印文件
 
 ---
 
-*最后更新：2026-06-23（T4 串流期后台重扫因平台禁用相机撤回；T3.3/T3.4/T3.5 实机验证通过）*
+*最后更新：2026-06-23（T6 锚点服务迁到 PC 端 + UE localhost 收取验证通过；LBEStreaming 改名/默认设置/
+外部存储/离线 adb 分发脚本 = T10 部署完成。早前：T4 后台重扫撤回；T3.3/T3.4/T3.5 实机通过）*
