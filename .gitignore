@@ -2,6 +2,8 @@
 /build_apk.log
 /UEPlugin/QuestAnchorReceive/Binaries/
 /UEPlugin/QuestAnchorReceive/Intermediate/
+# External reference material (VR app license source) — local only, not part of ALVR
+/Ref/
 
 Debug
 Release

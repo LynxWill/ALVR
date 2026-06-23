@@ -546,7 +546,7 @@ impl AnchorUi {
         // Each block is a full-size Chinese line + a smaller English line; blocks
         // are separated by a blank line. Single-language per line avoids the
         // horizontal clipping that the old "中文 / English" lines caused.
-        let mut blocks: Vec<String> = vec![bz("ALVR Lynx · 锚点", "ALVR Lynx · Anchor")];
+        let mut blocks: Vec<String> = vec![bz("LBEStreaming · 锚点", "LBEStreaming · Anchor")];
         match self.phase {
             Phase::Startup => {
                 if let Some(c) = &self.config {
