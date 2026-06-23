@@ -29,7 +29,7 @@ libc = "0.2"
 ndk-context = "0.1"
 
 [package.metadata.android]
-package = "alvr.client.lynx"               # Lynx build — coexists with Meta Store "alvr.client"
+package = "alvr.client.lbestreaming"       # LBEStreaming build — coexists with Meta Store "alvr.client"
 install_location = "auto"
 build_targets = ["aarch64-linux-android"]
 runtime_libs = "../../deps/android_openxr"

@@ -240,7 +240,7 @@ impl eframe::App for Dashboard {
                         .fill(theme::LIGHTER_BG)
                         .inner_margin(Margin::same(7)),
                 )
-                .exact_size(160.0)
+                .exact_size(210.0)
                 .show_inside(ui, |ui| {
                     ui.with_layout(Layout::top_down_justified(Align::Center), |ui| {
                         ui.add_space(13.0);

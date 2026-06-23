@@ -247,9 +247,10 @@ App 启动
 
 - [x] 步骤状态机（5 步）+ 每步 HUD 文案 + 控制器/手势射线交互
 - [x] **步骤 1**：扫描主 marker（稳定门控自动 capture）→ [GREEN]确认/[RED]重扫 → 存主 marker(id+尺寸)
-- [ ] 📌 **步骤 1 加提示：先确认地面高度准确**。原点放置（步骤 2）用 STAGE `y=0` 平面硬编码作地面，
-      不做实测探测；若 guardian 地板标定有偏差，原点高度会跟着偏。→ 在步骤 1 HUD 加一行中英提示，
-      让用户先核对（必要时重设 guardian 地板）再扫码。**仅加提示，不改地面探测实现。**
+- [x] ✅ 📌 **步骤 1 加提示：先确认地面高度准确**（2026-06-23，待实机看排版）。原点放置（步骤 2）
+      用 STAGE `y=0` 平面硬编码作地面，不做实测探测；若 guardian 地板标定有偏差，原点高度会跟着偏。
+      `anchor_ui.rs` 步骤 1 HUD 加了一行中英小字号提示（`\u{1}` 前缀），让用户先核对再扫码。
+      **仅加提示，未改地面探测实现。**
 - [x] **步骤 2**：扳机射线打**地面（STAGE y=0）**落原点位置（显示射线 + 黄色十字）→ 重打可移动 → [GREEN]下一步
 - [x] **步骤 3**：第 2 点 = 正方向上一点（显示射线 + 原点十字 + 正方向十字 + 连线）→ [GREEN]下一步
       → 两点生成「主 marker→原点」offset（原点 +Z=指向方向、+Y=up）
@@ -372,14 +373,20 @@ App 启动
 > 背景：UE 与 PC ALVR 同机；UE 直连 Quest:9945 需手填 IP，且 USB 串流时 Quest LAN IP 不可路由。
 > 评估三方案后采用**方案1**（详见对话/CLAUDE.md）。
 
-- [ ] **头显端改"推"**：anchor **数据有变化时主动推**给 PC（走 ALVR **控制通道**
-      `ClientControlPacket`，不再对 LAN 开 9945）。小包、低频，贴合控制包模型。
-- [ ] **PC 端接收 + 缓存到文件**：server 端收到 anchor → 缓存（并落盘到文件，掉电/重启可读）。
-- [ ] **PC 端查询服务**：把现在 Quest 上的 `anchor_service.rs` 响应器搬到 PC，绑 **`127.0.0.1:9945`**；
-      **随软件运行常开、软件关闭一并关闭**（生命周期绑 PC ALVR 进程）。
-- [ ] **UE 插件不改**：仍用现有 Pull 代码、按需主动拉；只把目标 IP 从手填改成 `127.0.0.1`
-      （或文档约定 localhost）。→ **每机位永久零配置**，USB/WiFi 都稳。
-- 协议落点参考：`alvr/server_core/src/connection.rs` 的控制收发；新增 anchor 控制包入 `alvr_packets`。
+- [x] ✅ **头显端改"推"**（2026-06-23，待实机验证）：新增 `ClientControlPacket::AnchorUpdate{uuid,pose}`
+      （`alvr_packets`）。`client_core::anchor_service` 改为「最新原点 + dirty 标志」缓存
+      （lobby 仍 `update()` 写入）；`client_core/connection.rs` 控制循环 `take_pending()` 检测到变化即
+      经控制通道推送，新连接建立时 `mark_dirty()` 重推。**Quest 不再开 9945**。
+- [x] ✅ **PC 端接收 + 缓存到文件**（2026-06-23）：`server_core/connection.rs` 收 `AnchorUpdate`
+      → `anchor_service::get().update()`；新建 `server_core/src/anchor_service.rs` 缓存 + 落盘
+      `config_dir/anchor_cache.json`（米存储，启动时回读，掉电/重启保留）。
+- [x] ✅ **PC 端查询服务**（2026-06-23）：响应器搬到 PC，绑 **`127.0.0.1:9945`**，在 `ServerCoreContext::new`
+      启动；生命周期绑 streamer 进程（进程退出即关）。响应 JSON 与原一致（cm、`..._cm` 坐标系）。
+- [x] ✅ **UE 插件不改**：协议/响应格式不变；只需把目标 IP 从手填改成 `127.0.0.1`（部署约定，非代码改）。
+- 落点：`alvr_packets`(新 `AnchorUpdate`) / `client_core`(anchor_service 缓存 + connection 推送) /
+      `server_core`(anchor_service 响应器 + lib 启动 + connection 接收)。**4 crate 均 `cargo check` 通过**。
+- ⚠ **待实机验证**：定制 APK + 定制 streamer 须**同步重建**（协议加了控制包）；验证 UE 查 127.0.0.1
+      能拿到 anchor、re-align 后能更新、重启 streamer 后能从文件回读。
 
 新建 `client_core/src/anchor_service.rs`（现状 Quest 端，迁移后逻辑移至 PC server 端）：
 

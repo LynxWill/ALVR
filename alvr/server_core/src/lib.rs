@@ -1,3 +1,5 @@
+pub mod anchor_service;
+
 mod bitrate;
 mod c_api;
 mod connection;
@@ -216,6 +218,13 @@ impl ServerCoreContext {
             video_channel_sender: Mutex::new(None),
             haptics_sender: Mutex::new(None),
         });
+
+        // Spatial-anchor co-location: start the PC-side anchor responder (UE pulls
+        // from 127.0.0.1:9945). Anchors arrive from the headset over the control
+        // channel and are cached + persisted next to session.json.
+        if let Some(layout) = FILESYSTEM_LAYOUT.get() {
+            anchor_service::start(layout.config_dir.join("anchor_cache.json"));
+        }
 
         let webserver_runtime = Runtime::new().unwrap();
         webserver_runtime.spawn({

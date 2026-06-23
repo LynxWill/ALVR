@@ -74,7 +74,7 @@ pub fn installer_path() -> PathBuf {
 
 pub fn dashboard_fname() -> &'static str {
     if cfg!(windows) {
-        "ALVR Dashboard.exe"
+        "LBEStreaming.exe"
     } else {
         "alvr_dashboard"
     }

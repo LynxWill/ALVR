@@ -775,6 +775,13 @@ fn xr_runtime_now(xr_instance: &xr::Instance) -> Option<xr::Time> {
 fn android_main(app: android_activity::AndroidApp) {
     use android_activity::{InputStatus, MainEvent, PollEvent};
 
+    // Store anchor_config.json in the app's external files dir
+    // (/sdcard/Android/data/<pkg>/files) so it can be provisioned across a fleet
+    // with adb push/pull. Must be set before the lobby reads the config.
+    if let Some(path) = app.external_data_path() {
+        alvr_client_core::anchor_config::set_storage_dir(path);
+    }
+
     let rendering_thread = thread::spawn(|| {
         // workaround for the Pico runtime
         let context = ndk_context::android_context();
