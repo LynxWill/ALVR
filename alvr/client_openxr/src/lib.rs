@@ -317,7 +317,7 @@ pub fn entry_point() {
     let xr_instance = xr_entry
         .create_instance(
             &xr::ApplicationInfo {
-                application_name: "ALVR Client",
+                application_name: "LBEStreaming",
                 application_version: 0,
                 engine_name: "ALVR",
                 engine_version: 0,

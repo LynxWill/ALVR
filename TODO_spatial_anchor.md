@@ -132,7 +132,7 @@ App 启动
 - [x] `client_openxr/lib.rs`：`AppPhase` 状态机，延迟 `resume()`，阶段 A→B 切换
 - [x] `client_openxr/lobby.rs`：采集射线（控制器 aim / 手势腕关节 fallback）+ trigger/pinch
 - [x] `client_openxr/anchor_ui.rs`：射线命中检测、确认按钮（实心矩形）、HUD 文字、阶段状态
-- [ ] ⚠ 将 anchor_ui 的"mock 创建"替换为 QR 检测结果（见 T2/T3）
+- [x] anchor_ui 已改为 marker 驱动（不再 mock，见 T3.1）
 
 ---
 
@@ -182,7 +182,7 @@ App 启动
 - [x] `getCalibration()`：读 `LENS_INTRINSIC_CALIBRATION` + `SENSOR_INFO_PRE_CORRECTION_ACTIVE_ARRAY_SIZE`
       + `LENS_POSE_TRANSLATION/ROTATION` + `LENS_DISTORTION`
 - [x] 实机：fx=fy=866.15, cx=643.36, cy=641.33（@1280²）；lensT/lensR 读到；dist=null ✅
-- [ ] ⚠ 内参 @1280² active，stream 640×360 非等比 → PnP 前需 scale（可能含 crop，实测校正）
+- [x] stream 已提到 1280×1280 = active array（无裁剪/无缩放），内参直接用（早期 640×360 scale 问题作废）
 
 #### 阶段 2d：QR 解码 ✅ / PnP+坐标 进行中
 
@@ -204,7 +204,6 @@ App 启动
 - [x] ⚠ 已知：快速移动时 world-pos 瞬态摆动几十 cm。根因 = 相机取帧→解码延迟
       （~150ms 检测循环 + 管线），`qr_in_cam` 对应的是更早头位姿，render 乘的是当前头位姿。
       → 用稳定门控滤掉（见 2e），不做完整时间戳对齐（hold-still 捕获用例不需要）。
-- [ ] 内参 scale 当前近似（居中裁剪假设），距离已够准；如需更高精度再精化 crop
 
 #### 阶段 2e：稳定性 + 输出 ✅（门控）
 
@@ -230,7 +229,6 @@ App 启动
 - [x] 渲染坐标系可视化：在 QR 世界 pose 处画**三轴**（X 红 / Y 绿 / Z 蓝，`push_axes`，
       `push_thick_line` 加粗便于 VR 可见），随检测实时更新；丢失视野 700ms 后回到搜索态
 - [x] 射线可视化（灰色，反馈用，`update(pointers)`）
-- [ ] （后续）「跳过」入口（不发锚点直接连接）
 
 #### T3.2 自动提交（当前简化流程，积木）✅
 
@@ -249,6 +247,9 @@ App 启动
 
 - [x] 步骤状态机（5 步）+ 每步 HUD 文案 + 控制器/手势射线交互
 - [x] **步骤 1**：扫描主 marker（稳定门控自动 capture）→ [GREEN]确认/[RED]重扫 → 存主 marker(id+尺寸)
+- [ ] 📌 **步骤 1 加提示：先确认地面高度准确**。原点放置（步骤 2）用 STAGE `y=0` 平面硬编码作地面，
+      不做实测探测；若 guardian 地板标定有偏差，原点高度会跟着偏。→ 在步骤 1 HUD 加一行中英提示，
+      让用户先核对（必要时重设 guardian 地板）再扫码。**仅加提示，不改地面探测实现。**
 - [x] **步骤 2**：扳机射线打**地面（STAGE y=0）**落原点位置（显示射线 + 黄色十字）→ 重打可移动 → [GREEN]下一步
 - [x] **步骤 3**：第 2 点 = 正方向上一点（显示射线 + 原点十字 + 正方向十字 + 连线）→ [GREEN]下一步
       → 两点生成「主 marker→原点」offset（原点 +Z=指向方向、+Y=up）
@@ -256,9 +257,9 @@ App 启动
 - [x] **步骤 5**：扫新 marker（已存的 HUD 显示"ALREADY saved"、禁确认）→ 新 marker [GREEN]确认/[RED]重扫
       → 存辅助 marker + 「辅助→主」offset → 回步骤 4 循环
 - [x] ✅ 实机验证（2026-06-22）：步骤 1-4 正常，重启后扫主码恢复原点正常。
-- [ ] ⚠ 渲染受限（只有线段+单 HUD）→ 按钮用**颜色编码线框盒**（绿=主/红=次/蓝=三），HUD 文字说明各色含义；
-      无逐按钮文字标签。若需更好交互（如真正面板/文字）后续再做。
-- [ ] 偏差：placement 用「点地面 + 重点击移动」代替显式「重新定位」按钮（更直观，待确认是否够用）
+- 📝 已知限制：渲染受限（只有线段+单 HUD）→ 按钮用**颜色编码线框盒**（绿=主/红=次/蓝=三），HUD 文字说明各色含义；
+      无逐按钮文字标签。若将来需要真正面板/文字交互再做。
+- 📝 设计偏差：placement 用「点地面 + 重点击移动」代替显式「重新定位」按钮（实测更直观，沿用此方案）。
 - **改动（2026-06-22）**：
   - 步骤 5 扫到重复码：🟩绿=重扫、🟥红=取消添加（回步骤 4）；新码仍 🟩确认/🟥重扫。
   - HUD **中英双语**：需 CJK 字体（Ubuntu 出不了中文）→ android 嵌 **Noto Sans SC**（OFL，
@@ -329,6 +330,15 @@ App 启动
       但同一限制下，re-align 也只有在透视真正可见时才有相机帧。
     - ⚠ 若将来 ALVR 以**开启 passthrough**（Blend/RGB/HSV chromakey）方式串流，则 `uses_passthrough()` 为真、
       透视层保留、相机持续通电，后台 re-pin **理论可行**——但本项目用例是不透明串流，故不采用。
+    - 📊 **耗电预判（2026-06-23，结论性，不实现）**：耗电大头是「为保活相机必须开 passthrough」本身，
+      **不是扫码计算**。① passthrough 通电（双 RGB sensor+ISP 取帧 + 合成器 reproject）≈ +1–3W，
+      整机串流 7–12W 基准下**续航缩 15%–30%**，且与扫不扫码无关。② ArUco 检测（CPU、无 SIMD、
+      6fps 占满一大核）≈ +0.3–0.8W（3%–8%），**可低占空比压到可忽略**（每 3–5s 突发扫 1–2 帧，
+      矫正是慢漂移补偿不需高频）。③ 取帧拷贝/JNI ≈ +0.1–0.3W，噪声级。
+      **判断**：若串流**本来就开 passthrough**，后台扫码边际成本仅 #2+#3≈0.4–1W（个位数 %），值得做；
+      若**为扫码才被迫开 passthrough**（不透明用例），#1 的 15%–30% 是硬成本且画面变透视混合，
+      不划算→仍用 T3.3 音量键 re-align。另注意**热**：相机+passthrough+解码长时间叠加易触发降频，
+      可能比掉电更先影响串流流畅度。
     - 保留的中性重构：`Lobby::process_marker`（返回 `AnchorTick::{Throttled,Lost,Marker}`）仍供 render/scan 路径用，
       含相机帧去重（`last_cam_instant`）与 `STABLE_WINDOW`(5s) 老化——对密集扫码无害。
 
@@ -353,11 +363,25 @@ App 启动
 
 ---
 
-### T6｜锚点响应服务（Quest 端）✅
+### T6｜锚点响应服务 ✅（现状 Quest 端）→ 🔄 迁移到 PC 端（方案1，2026-06-23 决议，待实现）
 
-> Pull 模式：Quest 缓存锚点，UE 调用 `RequestAnchor` 拉取。
+> Pull 模式：缓存锚点，UE 调用 `RequestAnchor` 拉取。
 
-新建 `client_core/src/anchor_service.rs`：
+#### 🔄 架构决议（2026-06-23）：anchor 服务从 Quest 端迁到 PC 端（方案1）
+
+> 背景：UE 与 PC ALVR 同机；UE 直连 Quest:9945 需手填 IP，且 USB 串流时 Quest LAN IP 不可路由。
+> 评估三方案后采用**方案1**（详见对话/CLAUDE.md）。
+
+- [ ] **头显端改"推"**：anchor **数据有变化时主动推**给 PC（走 ALVR **控制通道**
+      `ClientControlPacket`，不再对 LAN 开 9945）。小包、低频，贴合控制包模型。
+- [ ] **PC 端接收 + 缓存到文件**：server 端收到 anchor → 缓存（并落盘到文件，掉电/重启可读）。
+- [ ] **PC 端查询服务**：把现在 Quest 上的 `anchor_service.rs` 响应器搬到 PC，绑 **`127.0.0.1:9945`**；
+      **随软件运行常开、软件关闭一并关闭**（生命周期绑 PC ALVR 进程）。
+- [ ] **UE 插件不改**：仍用现有 Pull 代码、按需主动拉；只把目标 IP 从手填改成 `127.0.0.1`
+      （或文档约定 localhost）。→ **每机位永久零配置**，USB/WiFi 都稳。
+- 协议落点参考：`alvr/server_core/src/connection.rs` 的控制收发；新增 anchor 控制包入 `alvr_packets`。
+
+新建 `client_core/src/anchor_service.rs`（现状 Quest 端，迁移后逻辑移至 PC server 端）：
 
 - [x] 端口 **9945**（9944 是 ALVR stream_port，避免冲突）
 - [x] `AnchorService` 全局单例（`OnceLock`），线程安全

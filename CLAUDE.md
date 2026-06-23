@@ -2,6 +2,8 @@
 
 PC→Quest VR 串流（Rust）上自研的**空间锚点 co-location**功能。详细 TODO 见
 [`TODO_spatial_anchor.md`](TODO_spatial_anchor.md)，本文件只放**构建/测试工作流**和**架构速查**。
+串流**授权/加密 license** 模块设计见 [`TODO_license.md`](TODO_license.md)（复用 VR 应用 LSVR 授权文件
++ protocol_id 私有盐配对 + dashboard 授权页，方案基线已定、待开工）。
 
 - 分支：`SpatialAnchor`（主干 `master`）
 - 平台：Windows 11 + PowerShell；Quest 3/3S（HorizonOS v74+，实测 v204）
@@ -117,8 +119,9 @@ marker_in_STAGE = head_in_STAGE * cam_in_head * marker_in_cam
   (隐藏透视层 + 串流期保留透视层)**弄坏了待机唤醒**(摘戴后卡"正在连接"),且根本没保住相机。
 - **`realign_gesture::note()` 用原 dedup 版**(同键 <60ms 判重复)。曾改成"折叠连续同键只数交替"想更鲁棒,
   反而表现为**只生效一次**;回退到 dedup 版后手势可重复触发。别再重写。
-- 一次失败实验会牵连多文件(lib/lobby/camera/java),**改大动作前先 `git` 存快照分支**(当时存了
-  `wip-before-t4-revert`,靠它干净回退)。本仓库 spatial anchor 全部工作**未提交**,无 commit 检查点。
+- 一次失败实验会牵连多文件(lib/lobby/camera/java),**改大动作前先 `git` 存快照分支/提交**——当时
+  全部工作未提交、无检查点,只能临时存 `wip-before-t4-revert` 干净回退。现已提交(`SpatialAnchor`
+  分支,PR #1),后续大改动前照例先 commit 一个检查点。
 
 ### 检测：ArUco（`aruco-rs` 纯 Rust，喂 **OpenCV DICT_4X4_250** 码表）
 - aruco-rs 只内置 5×5/6×6 字典；用户的码是 **OpenCV `DICT_4X4`**（4×4 数据+1 格边=6×6）。
