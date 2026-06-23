@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "QuestAnchorReceive",
+	"Description": "Receive Quest space anchor",
+	"Category": "Other",
+	"CreatedBy": "Lynx",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "QuestAnchorReceive",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}

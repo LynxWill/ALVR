@@ -263,6 +263,7 @@ dependencies = [
  "alvr_session",
  "alvr_system_info",
  "android-activity",
+ "aruco-rs",
  "jni 0.22.4",
  "libc",
  "ndk-context",
@@ -697,6 +698,17 @@ name = "arrayvec"
 version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c02d123df017efcdfbd739ef81735b36c5ba83ec3c59c80a9d7ecc718f92e50"
+
+[[package]]
+name = "aruco-rs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f55b85f68b78916de32cb5646035ec81090c009c9826b9d413e275279164515d"
+dependencies = [
+ "log",
+ "nalgebra",
+ "safe_arch 1.0.0",
+]
 
 [[package]]
 name = "as-raw-xcb-connection"
@@ -5308,6 +5320,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe_arch"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f7caad094bd561859bcd467734a720c3c1f5d1f338995351fefe2190c45efed"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7341,7 +7359,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ce5da8ecb62bcd8ec8b7ea19f69a51275e91299be594ea5cc6ef7819e16cd03"
 dependencies = [
  "bytemuck",
- "safe_arch",
+ "safe_arch 0.7.4",
 ]
 
 [[package]]

@@ -93,6 +93,10 @@ pub fn connection_lifecycle_loop(
 ) {
     dbg_connection!("connection_lifecycle_loop: Begin");
 
+    // 启动锚点响应服务（全局单例，整个 App 生命周期常驻）。
+    // T2 完成后，锚点查询结果通过 ANCHOR_SERVICE.update() 写入。
+    crate::anchor_service::get().start_responder();
+
     set_hud_message(&event_queue, INITIAL_MESSAGE);
 
     while *lifecycle_state.read() != LifecycleState::ShuttingDown {
@@ -212,6 +216,8 @@ fn connection_pipeline(
         Ok(ServerControlPacket::StartStream) => {
             info!("Stream starting");
             set_hud_message(&event_queue, STREAM_STARTING_MESSAGE);
+            // 锚点数据由 AnchorService 响应器按需提供（UE 主动查询时回复）。
+            // 响应器在 connection_lifecycle_loop 启动时已启动，此处无需额外操作。
         }
         Ok(ServerControlPacket::Restarting) => {
             info!("Server restarting");

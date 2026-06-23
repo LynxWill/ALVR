@@ -5,6 +5,8 @@
     clippy::unseparated_literal_suffix
 )]
 
+pub mod anchor_config;
+pub mod anchor_service;
 mod c_api;
 mod connection;
 mod logging_backend;

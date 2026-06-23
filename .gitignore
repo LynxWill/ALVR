@@ -1,3 +1,8 @@
+# ALVR SpatialAnchor — build artifacts / logs (don't commit)
+/build_apk.log
+/UEPlugin/QuestAnchorReceive/Binaries/
+/UEPlugin/QuestAnchorReceive/Intermediate/
+
 Debug
 Release
 *.opensdf

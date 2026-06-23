@@ -19,6 +19,7 @@ alvr_system_info.workspace = true
 
 jni = "0.22"
 openxr = "0.21"
+aruco-rs = "0.1"  # pure-Rust ArUco fiducial detector for passthrough-camera anchor
 
 [target.'cfg(target_os = "android")'.dependencies]
 # Pinning android-activity to 0.6.0. v0.6.1 changed ndk-context initialization from Activity to
@@ -28,7 +29,7 @@ libc = "0.2"
 ndk-context = "0.1"
 
 [package.metadata.android]
-package = "alvr.client.dev"                # Changed for Meta Store
+package = "alvr.client.lynx"               # Lynx build — coexists with Meta Store "alvr.client"
 install_location = "auto"
 build_targets = ["aarch64-linux-android"]
 runtime_libs = "../../deps/android_openxr"
@@ -67,6 +68,12 @@ name = "android.permission.CHANGE_WIFI_MULTICAST_STATE"
 name = "android.permission.INTERNET"
 [[package.metadata.android.uses_permission]]
 name = "android.permission.RECORD_AUDIO"
+# Passthrough Camera Access (QR detection via PCA). HEADSET_CAMERA gives
+# passthrough-only access; CAMERA is the fallback on older permission models.
+[[package.metadata.android.uses_permission]]
+name = "horizonos.permission.HEADSET_CAMERA"
+[[package.metadata.android.uses_permission]]
+name = "android.permission.CAMERA"
 # WAKE_LOCK is needed for proper wifi locking
 # https://developer.android.com/reference/android/net/wifi/WifiManager.WifiLock
 [[package.metadata.android.uses_permission]]
@@ -86,7 +93,7 @@ authorities = "org.khronos.openxr.runtime_broker;org.khronos.openxr.system_runti
 debuggable = false
 theme = "@android:style/Theme.Black.NoTitleBar.Fullscreen"
 icon = "@mipmap/ic_launcher"
-label = "ALVR"
+label = "ALVR_Lynx"
 
 [package.metadata.android.application.activity]
 config_changes = "density|keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|uiMode"

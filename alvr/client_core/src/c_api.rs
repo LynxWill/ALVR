@@ -754,6 +754,7 @@ pub extern "C" fn alvr_render_lobby_opengl(
                 vec![],
                 render_background,
                 false,
+                &[],
             );
         }
     });

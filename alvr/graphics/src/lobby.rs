@@ -6,7 +6,7 @@ use alvr_common::{
 };
 use glyph_brush_layout::{
     FontId, GlyphPositioner, HorizontalAlign, Layout, SectionGeometry, SectionText, VerticalAlign,
-    ab_glyph::{Font, FontRef, ScaleFont},
+    ab_glyph::{Font, FontRef},
 };
 use std::{f32::consts::FRAC_PI_2, mem, rc::Rc};
 use wgpu::{
@@ -45,6 +45,10 @@ const HUD_DIST: f32 = 5.0;
 const HUD_SIDE: f32 = 3.5;
 const HUD_TEXTURE_SIDE: usize = 1024;
 const FONT_SIZE: f32 = 50.0;
+// Smaller size for lines prefixed with SMALL_LINE_PREFIX (the English line of the
+// bilingual anchor HUD, kept secondary to the full-size Chinese line above it).
+const FONT_SIZE_SMALL: f32 = 34.0;
+const SMALL_LINE_PREFIX: char = '\u{1}';
 
 const FAST_BORDER_OFFSETS: [IVec2; 8] = [
     IVec2::new(0, -3),
@@ -321,14 +325,42 @@ impl LobbyRenderer {
     }
 
     pub fn update_hud_message(&self, message: &str) {
-        let ubuntu_font =
-            FontRef::try_from_slice(include_bytes!("../resources/Ubuntu-Medium.ttf")).unwrap();
+        // The Quest HUD shows bilingual (中文/English) anchor text, so on Android
+        // use Noto Sans SC (SIL OFL, has CJK + Latin). Other targets (PC streamer)
+        // keep the small Latin-only Ubuntu font — they never show the Chinese
+        // anchor HUD, so there's no need to embed the ~17MB CJK font there.
+        #[cfg(target_os = "android")]
+        let font_bytes: &[u8] = include_bytes!("../resources/NotoSansSC-VF.ttf");
+        #[cfg(not(target_os = "android"))]
+        let font_bytes: &[u8] = include_bytes!("../resources/Ubuntu-Medium.ttf");
+        let hud_font = FontRef::try_from_slice(font_bytes).unwrap();
+
+        // Per-line scale: a line starting with SMALL_LINE_PREFIX renders smaller
+        // (the English line of the bilingual anchor HUD; the Chinese line above
+        // stays full size). Build owned "<line>\n" strings so each SectionText
+        // can borrow one. Messages without the prefix (e.g. ALVR connection
+        // status) all render at the normal size, unchanged.
+        let lines: Vec<(String, f32)> = message
+            .split('\n')
+            .map(|line| match line.strip_prefix(SMALL_LINE_PREFIX) {
+                Some(rest) => (format!("{rest}\n"), FONT_SIZE_SMALL),
+                None => (format!("{line}\n"), FONT_SIZE),
+            })
+            .collect();
+        let sections: Vec<SectionText> = lines
+            .iter()
+            .map(|(text, scale)| SectionText {
+                text,
+                scale: (*scale).into(),
+                font_id: FontId(0),
+            })
+            .collect();
 
         let section_glyphs = Layout::default()
             .h_align(HorizontalAlign::Center)
             .v_align(VerticalAlign::Center)
             .calculate_glyphs(
-                &[&ubuntu_font],
+                &[&hud_font],
                 &SectionGeometry {
                     screen_position: (
                         HUD_TEXTURE_SIDE as f32 / 2_f32,
@@ -336,19 +368,15 @@ impl LobbyRenderer {
                     ),
                     ..Default::default()
                 },
-                &[SectionText {
-                    text: message,
-                    scale: FONT_SIZE.into(),
-                    font_id: FontId(0),
-                }],
+                &sections,
             );
-
-        let scaled_font = ubuntu_font.as_scaled(FONT_SIZE);
 
         let mut buffer = vec![0; HUD_TEXTURE_SIDE * HUD_TEXTURE_SIDE * 4];
 
         for section_glyph in section_glyphs {
-            if let Some(outlined) = scaled_font.outline_glyph(section_glyph.glyph) {
+            // Outline from the base font so each glyph uses its own per-line scale
+            // (set above), rather than forcing a single size.
+            if let Some(outlined) = hud_font.outline_glyph(section_glyph.glyph) {
                 let bounds = outlined.px_bounds();
 
                 outlined.draw(|x, y, alpha| {
@@ -408,6 +436,9 @@ impl LobbyRenderer {
         additional_motions: Vec<DeviceMotion>,
         render_background: bool,
         show_velocities: bool,
+        // Anchor UI: arbitrary coloured line segments (button frame, pointer ray).
+        // Each entry: (from, to, rgba). Drawn with the line pipeline in every view.
+        extra_lines: &[(Vec3, Vec3, [u8; 4])],
     ) {
         let mut encoder = self
             .context
@@ -641,6 +672,26 @@ impl LobbyRenderer {
                         );
                         transform_draw(&mut pass, view_proj * transform, 2);
                     }
+                }
+            }
+
+            // Anchor UI: draw extra coloured line segments (button frame, ray).
+            // line_pipeline is already bound; the local-space segment is (0,0,0)->(0,0,-1).
+            for (from, to, color) in extra_lines {
+                let delta = *to - *from;
+                let len = delta.length();
+                if len > 1e-6 {
+                    let transform = Mat4::from_scale_rotation_translation(
+                        Vec3::ONE * len,
+                        Quat::from_rotation_arc(-Vec3::Z, delta / len),
+                        *from,
+                    );
+                    pass.set_push_constants(
+                        ShaderStages::VERTEX_FRAGMENT,
+                        COLOR_CONST_OFFSET,
+                        color,
+                    );
+                    transform_draw(&mut pass, view_proj * transform, 2);
                 }
             }
         }

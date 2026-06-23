@@ -96,13 +96,14 @@ impl QRCodesSpatialContext {
         };
 
         let mut create_context_future: sys::FutureEXT = sys::FutureEXT::from_raw(0);
-        unsafe {
-            super::xr_res((spatial_entity_fns.create_spatial_context_async)(
+        let create_result = unsafe {
+            (spatial_entity_fns.create_spatial_context_async)(
                 session.as_handle(),
                 &spatial_context_create_info,
                 &mut create_context_future,
-            ))?;
-        }
+            )
+        };
+        super::xr_res(create_result)?;
 
         Ok(QRCodesSpatialContext {
             session: session.clone().into_any_graphics(),
@@ -125,18 +126,23 @@ impl QRCodesSpatialContext {
             SpatialContextState::Ready(data) => data,
 
             SpatialContextState::Creating(future) => {
-                if !super::check_future(self.session.instance(), *future)? {
-                    return Ok(None);
-                }
-
+                // The Meta runtime appears to complete context creation
+                // synchronously / via event and returns a future that
+                // poll_future reports as INVALID. So instead of gating on
+                // check_future == READY, try completing directly every frame;
+                // treat any non-SUCCESS completion call as "retry next frame".
                 let completion = unsafe {
                     let mut completion =
                         sys::CreateSpatialContextCompletionEXT::out(ptr::null_mut());
-                    super::xr_res((self.spatial_entity_fns.create_spatial_context_complete)(
+                    let res = (self.spatial_entity_fns.create_spatial_context_complete)(
                         self.session.as_handle(),
                         *future,
                         completion.as_mut_ptr(),
-                    ))?;
+                    );
+                    if res != sys::Result::SUCCESS {
+                        // Not ready yet (e.g. FUTURE_PENDING) — retry next frame.
+                        return Ok(None);
+                    }
                     completion.assume_init()
                 };
                 if completion.future_result != sys::Result::SUCCESS {

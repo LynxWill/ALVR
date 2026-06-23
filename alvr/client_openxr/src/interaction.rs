@@ -1168,14 +1168,13 @@ pub fn get_marker_poses(
 ) -> Option<Vec<(String, Pose)>> {
     let xr_time = crate::to_xr_time(time);
 
-    context
-        .poll(reference_space, xr_time)
-        .ok()
-        .flatten()
-        .map(|markers| {
+    match context.poll(reference_space, xr_time) {
+        Ok(opt) => opt.map(|markers| {
             markers
                 .into_iter()
                 .map(|(id, pose)| (id, crate::from_xr_pose(pose)))
                 .collect()
-        })
+        }),
+        Err(_) => None,
+    }
 }

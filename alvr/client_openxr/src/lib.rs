@@ -1,4 +1,8 @@
+mod anchor_ui;
 mod c_api;
+mod aruco_dict_4x4;
+mod camera;
+mod qr_pose;
 mod extra_extensions;
 mod graphics;
 mod interaction;
@@ -27,6 +31,58 @@ use openxr as xr;
 use passthrough::PassthroughLayer;
 use std::{collections::HashSet, ffi::CStr, path::Path, rc::Rc, sync::Arc, thread, time::Duration};
 use stream::StreamContext;
+
+/// T3.3: set by the volume-key re-align gesture (detected in `android_main`),
+/// polled by the render loop to re-scan a marker and recompute the origin while
+/// keeping the PC connection (no disconnect).
+#[cfg(target_os = "android")]
+static REALIGN_REQUESTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Detects the hidden re-align gesture: volume Up/Down alternating ≥6 times, each
+/// press within ~1.2s of the last. Quest reports each physical press twice with
+/// near-identical timestamps, so same-key events <60ms apart are de-duplicated.
+#[cfg(target_os = "android")]
+mod realign_gesture {
+    use android_activity::input::Keycode;
+    use std::{sync::Mutex, time::Instant};
+
+    struct State {
+        last: Option<(Keycode, Instant)>,
+        run: u32,
+    }
+    static STATE: Mutex<State> = Mutex::new(State { last: None, run: 0 });
+
+    const NEEDED: u32 = 6;
+    const STEP_TIMEOUT_MS: u128 = 1200;
+    const DEDUP_MS: u128 = 60;
+
+    /// Feed a volume-key DOWN. Returns true once the full pattern completes.
+    pub fn note(keycode: Keycode) -> bool {
+        let now = Instant::now();
+        let mut s = STATE.lock().unwrap();
+        if let Some((k, t)) = s.last {
+            let gap = now.duration_since(t).as_millis();
+            if k == keycode && gap < DEDUP_MS {
+                return false; // duplicate report of the same physical press
+            }
+            if gap > STEP_TIMEOUT_MS || k == keycode {
+                s.run = 1; // too slow, or not alternating → restart the run
+            } else {
+                s.run += 1;
+            }
+        } else {
+            s.run = 1;
+        }
+        s.last = Some((keycode, now));
+        if s.run >= NEEDED {
+            s.last = None;
+            s.run = 0;
+            true
+        } else {
+            false
+        }
+    }
+}
 
 fn from_xr_vec3(v: xr::Vector3f) -> Vec3 {
     Vec3::new(v.x, v.y, v.z)
@@ -159,6 +215,9 @@ fn create_session(
 
 pub fn entry_point() {
     alvr_client_core::init_logging();
+
+    // Passthrough-camera QR detection runs on its own thread (non-blocking).
+    camera::start_qr_detection();
 
     const LEGACY_OPENXR_VERSION: xr::Version = xr::Version::new(1, 0, 34);
     const CURRENT_OPENXR_VERSION: xr::Version = xr::Version::new(1, 1, 36);
@@ -377,7 +436,10 @@ pub fn entry_point() {
             face_tracking: None,
             body_tracking: lobby_body_tracking_config,
             prefers_multimodal_input: true,
-            markers_to_track: Some(HashSet::new()),
+            // Disabled: XR_EXT marker tracking is broken on this Quest runtime
+            // (see TODO v2 failure). We do QR via the passthrough camera instead.
+            // Leaving it on spams ERROR_FUTURE_INVALID_EXT every frame.
+            markers_to_track: None,
         };
         interaction_context
             .write()
@@ -386,6 +448,17 @@ pub fn entry_point() {
         let mut session_running = false;
         let mut stream_context = None::<StreamContext>;
         let mut passthrough_layer = None;
+        // Anchor check phase: defer core_context.resume() (connection) until the
+        // user's anchor has been located/created in the pre-connection UI.
+        let mut resumed = false;
+        // T3.3: re-align mode — while streaming, render the lobby/anchor UI to
+        // re-scan a marker and recompute the origin, WITHOUT dropping the stream.
+        #[cfg(target_os = "android")]
+        let mut realign_active = false;
+        // Whether we turned passthrough on for re-align (a VR stream disables it),
+        // so we can restore it to None on exit.
+        #[cfg(target_os = "android")]
+        let mut realign_made_passthrough = false;
 
         let mut event_storage = xr::EventDataBuffer::new();
         let mut headset_is_worn = true;
@@ -402,7 +475,14 @@ pub fn entry_point() {
                                 .begin(xr::ViewConfigurationType::PRIMARY_STEREO)
                                 .unwrap();
 
-                            core_context.resume();
+                            // The FIRST connection is deferred until the anchor check phase
+                            // completes (see the resume gate in the render loop). After that,
+                            // STOPPING (headset off / standby) calls core_context.pause(), so
+                            // every subsequent READY (wake) must resume() again — otherwise the
+                            // connection stays paused and the user is stuck on "connecting".
+                            if resumed {
+                                core_context.resume();
+                            }
 
                             passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
 
@@ -427,6 +507,14 @@ pub fn entry_point() {
                             "ReferenceSpaceChangePending type: {:?}",
                             event.reference_space_type()
                         );
+
+                        // NOTE: pose_in_previous_space is unreliable on this Quest
+                        // runtime (reports 8–15 m deltas while the LOCAL_FLOOR origin
+                        // actually barely moves), so we do NOT math-compensate the
+                        // cached anchor here — doing so threw it metres away. The
+                        // marker is ground truth: the anchor is re-derived whenever
+                        // it is in view (see the coordinate chain), which corrects
+                        // any small re-illumination drift on the next sighting.
 
                         lobby.update_reference_space();
 
@@ -462,11 +550,23 @@ pub fn entry_point() {
                 continue;
             }
 
+            // Resume gate: once the anchor check UI reports ready, start the
+            // connection (this also starts the T6 anchor responder) and hand
+            // HUD control back to ALVR's connection messages.
+            if !resumed && lobby.is_anchor_ready() {
+                info!("Anchor check complete — starting connection");
+                core_context.resume();
+                lobby.end_anchor_phase_a();
+                resumed = true;
+            }
+
             while let Some(event) = core_context.poll_event() {
                 match event {
                     ClientCoreEvent::UpdateHudMessage(message) => {
-                        last_lobby_message.clone_from(&message);
-                        lobby.update_hud_message(&message);
+                        // Phase B: append anchor status to ALVR connection messages.
+                        let full = format!("{}{}", message, lobby.anchor_status_suffix());
+                        last_lobby_message.clone_from(&full);
+                        lobby.update_hud_message(&full);
                     }
                     ClientCoreEvent::StreamingStarted(config) => {
                         let config = ParsedStreamConfig::new(&config);
@@ -582,11 +682,50 @@ pub fn entry_point() {
                 continue;
             }
 
+            // T3.3: enter/exit re-align mode. The volume gesture (set in
+            // android_main) requests a re-scan while streaming; we keep the
+            // connection alive and render the lobby/anchor UI until a known marker
+            // re-establishes the origin, then return to the stream.
+            #[cfg(target_os = "android")]
+            {
+                if REALIGN_REQUESTED.swap(false, std::sync::atomic::Ordering::Relaxed)
+                    && resumed
+                    && stream_context.is_some()
+                    && !realign_active
+                {
+                    info!("Re-align gesture — re-scanning marker (connection kept)");
+                    lobby.begin_realign();
+                    realign_active = true;
+                    // A VR stream disables passthrough; turn it back on so the scan
+                    // UI shows the real world behind it (else the background is black).
+                    if passthrough_layer.is_none() {
+                        passthrough_layer = PassthroughLayer::new(&xr_session, platform).ok();
+                        realign_made_passthrough = passthrough_layer.is_some();
+                    }
+                }
+                if realign_active && lobby.is_anchor_ready() {
+                    info!("Re-align complete — origin updated, resuming stream");
+                    lobby.end_anchor_phase_a();
+                    realign_active = false;
+                    // Restore the passthrough state we changed for re-align.
+                    if realign_made_passthrough {
+                        passthrough_layer = None;
+                        realign_made_passthrough = false;
+                    }
+                }
+            }
+
+            // While re-aligning, render the lobby/anchor UI even though the stream
+            // context is still alive (connection preserved).
+            #[cfg(target_os = "android")]
+            let render_lobby = realign_active;
+            #[cfg(not(target_os = "android"))]
+            let render_lobby = false;
+
             // todo: allow rendering lobby and stream layers at the same time and add cross fade
-            let (layer, display_time) = if let Some(stream) = &mut stream_context {
-                stream.render(frame_interval, vsync_time)
-            } else {
-                (lobby.render(vsync_time), vsync_time)
+            let (layer, display_time) = match &mut stream_context {
+                Some(stream) if !render_lobby => stream.render(frame_interval, vsync_time),
+                _ => (lobby.render(vsync_time), vsync_time),
             };
 
             let layers: &[&xr::CompositionLayerBase<_>] =
@@ -655,8 +794,24 @@ fn android_main(app: android_activity::AndroidApp) {
                 should_quit = true;
             }
             PollEvent::Main(MainEvent::InputAvailable) => {
+                use android_activity::input::{InputEvent, KeyAction, Keycode};
                 if let Ok(mut iter) = app.input_events_iter() {
-                    while iter.next(|_| InputStatus::Unhandled) {}
+                    while iter.next(|event| {
+                        // T3.3: detect the hidden volume +−+−+− re-align gesture.
+                        // Volume keys are otherwise left unhandled (system handles them).
+                        if let InputEvent::KeyEvent(key_event) = event {
+                            let kc = key_event.key_code();
+                            if key_event.action() == KeyAction::Down
+                                && matches!(kc, Keycode::VolumeUp | Keycode::VolumeDown)
+                                && realign_gesture::note(kc)
+                            {
+                                info!("[REALIGN] volume +−+−+− detected — requesting re-align");
+                                REALIGN_REQUESTED
+                                    .store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                        InputStatus::Unhandled
+                    }) {}
                 }
             }
             _ => (),
