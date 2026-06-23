@@ -199,6 +199,12 @@ pub enum ClientControlPacket {
         message: String,
     },
     ProximityState(bool),
+    // Spatial-anchor co-location: client pushes the established game origin (in STAGE)
+    // to the PC so the PC-side responder can serve it to UE on localhost.
+    AnchorUpdate {
+        uuid: String,
+        pose: Pose,
+    },
     Reserved(String),
     ReservedBuffer(Vec<u8>),
 }

@@ -27,7 +27,24 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
+/// Optional override for where `anchor_config.json` lives. On Android this is set
+/// (from `client_openxr`) to the app's **external files dir**
+/// (`/sdcard/Android/data/<pkg>/files`) so the config can be provisioned across a
+/// fleet with `adb push`/`adb pull` — the default app-private storage is not
+/// reachable by adb on a non-debuggable build.
+static STORAGE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the directory holding `anchor_config.json`. Call once at startup, before
+/// the config is first read/written. No-op if already set.
+pub fn set_storage_dir(dir: PathBuf) {
+    let _ = STORAGE_DIR.set(dir);
+}
+
 fn config_path() -> PathBuf {
+    if let Some(dir) = STORAGE_DIR.get() {
+        return dir.join("anchor_config.json");
+    }
+
     app_dirs2::app_root(
         AppDataType::UserConfig,
         &AppInfo {

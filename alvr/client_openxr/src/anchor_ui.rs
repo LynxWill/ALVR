@@ -576,6 +576,10 @@ impl AnchorUi {
             }
             Phase::Wizard(Step::ScanPrimary) => {
                 blocks.push(bz("步骤 1 — 主码", "Step 1 — Primary marker"));
+                blocks.push(bz(
+                    "请先确认地面高度准确",
+                    "Confirm floor height is correct first",
+                ));
                 if let Some((id, _, _)) = self.captured {
                     blocks.push(bz(
                         &format!("检测到 '{}' (id {id})", id_letter(id)),

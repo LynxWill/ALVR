@@ -81,7 +81,7 @@ pub fn resolution_schema() -> PresetSchemaNode {
             content: None,
         })
         .collect(),
-        default_option_display_name: "Medium (width: 4288)".into(),
+        default_option_display_name: "Very Low (width: 3072)".into(),
         gui: ChoiceControlType::Dropdown,
     })
 }

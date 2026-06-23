@@ -1643,7 +1643,7 @@ pub fn session_settings_default() -> SettingsDefault {
         variant: FrameSizeDefaultVariant::Absolute,
         Scale: 1.0,
         Absolute: FrameSizeAbsoluteDefault {
-            width: 2144,
+            width: 1536,
             height: OptionalDefault {
                 set: false,
                 content: 1072,
@@ -2161,7 +2161,7 @@ pub fn session_settings_default() -> SettingsDefault {
             recentering_mode: RecenteringModeDefault {
                 Local: RecenteringModeLocalDefault { view_height: 1.5 },
                 Tilted: RecenteringModeTiltedDefault { view_height: 1.5 },
-                variant: RecenteringModeDefaultVariant::LocalFloor,
+                variant: RecenteringModeDefaultVariant::Stage,
             },
             marker_colocation: SwitchDefault {
                 enabled: false,
@@ -2265,7 +2265,7 @@ pub fn session_settings_default() -> SettingsDefault {
                 },
             },
             steamvr_launcher: SteamvrLauncherDefault {
-                open_close_steamvr_with_dashboard: false,
+                open_close_steamvr_with_dashboard: true,
                 direct_launch: false,
             },
             capture: CaptureConfigDefault {

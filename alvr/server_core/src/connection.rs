@@ -1305,6 +1305,9 @@ fn connection_pipeline(
                             .send(ServerCoreEvent::ProximityState(headset_is_worn))
                             .ok();
                     }
+                    ClientControlPacket::AnchorUpdate { uuid, pose } => {
+                        crate::anchor_service::get().update(uuid, pose);
+                    }
                     ClientControlPacket::Reserved(_) | ClientControlPacket::ReservedBuffer(_) => (),
                 }
 

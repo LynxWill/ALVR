@@ -93,9 +93,8 @@ pub fn connection_lifecycle_loop(
 ) {
     dbg_connection!("connection_lifecycle_loop: Begin");
 
-    // 启动锚点响应服务（全局单例，整个 App 生命周期常驻）。
-    // T2 完成后，锚点查询结果通过 ANCHOR_SERVICE.update() 写入。
-    crate::anchor_service::get().start_responder();
+    // 方案1：anchor 不再由 Quest 直接响应 UE。lobby 写入 `anchor_service`，下面
+    // 连接建立后通过控制通道推给 PC（PC 端缓存 + 在 127.0.0.1:9945 响应 UE）。
 
     set_hud_message(&event_queue, INITIAL_MESSAGE);
 
@@ -258,6 +257,9 @@ fn connection_pipeline(
         set_hud_message(&event_queue, SERVER_DISCONNECTED_MESSAGE);
         return Ok(());
     }
+
+    // New connection: re-push the current game origin (if any) to this PC.
+    crate::anchor_service::get().mark_dirty();
 
     dbg_connection!("connection_pipeline: accept connection");
     let mut stream_socket = stream_socket_builder.accept_from_server(
@@ -448,6 +450,18 @@ fn connection_pipeline(
                     sender.send(&ClientControlPacket::KeepAlive).ok();
 
                     keepalive_deadline = Instant::now() + KEEPALIVE_INTERVAL;
+                }
+
+                // Push the game origin to the PC whenever it changed (push-on-change).
+                if let Some(state) = crate::anchor_service::get().take_pending()
+                    && let Some(sender) = &mut *ctx.control_sender.lock()
+                {
+                    sender
+                        .send(&ClientControlPacket::AnchorUpdate {
+                            uuid: state.uuid,
+                            pose: state.pose,
+                        })
+                        .ok();
                 }
 
                 #[cfg(target_os = "android")]

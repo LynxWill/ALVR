@@ -1,20 +1,15 @@
-/// T6 — Anchor Responder Service（Quest 端）
+/// T6 — Anchor cache（Quest 端）
 ///
-/// 架构：Pull 模式
-///   - Quest 启动时查询/创建锚点，结果缓存到 `AnchorService`
-///   - 后台线程监听 UDP :9945，收到任意查询包后回复最新锚点 JSON
-///   - UE 插件调用 RequestAnchor(QuestIP) 发送查询，收到响应后触发 Delegate
+/// 架构（方案1，2026-06-23 起）：anchor 不再由 Quest 直接响应 UE，而是
+///   - lobby 建立/更新游戏原点后写入这里（`update`）
+///   - `connection.rs` 的控制循环检测到变化（`take_pending`）后，经 ALVR 控制通道
+///     `ClientControlPacket::AnchorUpdate` 推给 PC；PC 端缓存 + 在 127.0.0.1:9945 响应 UE。
 ///
-/// 端口：9945（9944 是 ALVR stream_port，避免冲突）
-use alvr_common::{Pose, info, warn};
-use serde::Serialize;
-use std::{
-    net::UdpSocket,
-    sync::{Arc, Mutex, OnceLock},
-    thread,
-};
+/// 本模块只是「最新原点 + 是否有未推送变化」的线程安全缓存，不再开 UDP 端口。
+use alvr_common::{Pose, info};
+use std::sync::{Arc, Mutex, OnceLock};
 
-/// 全局单例，供 connection.rs、spatial_anchor.rs（T2）等各处共享。
+/// 全局单例，供 lobby 写入、connection 读取并推送。
 pub static ANCHOR_SERVICE: OnceLock<AnchorService> = OnceLock::new();
 
 /// 获取全局单例，若未初始化则自动初始化。
@@ -22,144 +17,76 @@ pub fn get() -> &'static AnchorService {
     ANCHOR_SERVICE.get_or_init(AnchorService::new)
 }
 
-pub const ANCHOR_SERVICE_PORT: u16 = 9945;
-
-// --------------------------------------------------------------------------
-// 共享锚点状态
-// --------------------------------------------------------------------------
-
 #[derive(Clone)]
 pub struct AnchorState {
     pub uuid: String,
     pub pose: Pose,
 }
 
-/// 线程安全的锚点缓存。
-/// None = 尚未找到锚点；Some = 已定位，可响应查询。
+struct Inner {
+    state: Option<AnchorState>,
+    /// True when `state` changed since the last `take_pending`, i.e. there is an
+    /// update that still needs to be pushed to the PC.
+    dirty: bool,
+}
+
+/// 线程安全的最新原点缓存 + 待推送标志。
 #[derive(Clone)]
 pub struct AnchorService {
-    state: Arc<Mutex<Option<AnchorState>>>,
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl Default for AnchorService {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl AnchorService {
     pub fn new() -> Self {
         Self {
-            state: Arc::new(Mutex::new(None)),
+            inner: Arc::new(Mutex::new(Inner {
+                state: None,
+                dirty: false,
+            })),
         }
     }
 
-    /// 锚点查询/创建成功后调用（T2 实现后接入）
+    /// 游戏原点建立/更新后调用（lobby）。标记为待推送。
     pub fn update(&self, uuid: String, pose: Pose) {
         info!("AnchorService: anchor updated — uuid={uuid}");
-        *self.state.lock().unwrap() = Some(AnchorState { uuid, pose });
+        let mut inner = self.inner.lock().unwrap();
+        inner.state = Some(AnchorState { uuid, pose });
+        inner.dirty = true;
     }
 
-    /// 主动放弃锚点（用户选择重新创建时调用）
+    /// 主动放弃原点（重新配置时）。
     pub fn clear(&self) {
         info!("AnchorService: anchor cleared");
-        *self.state.lock().unwrap() = None;
+        let mut inner = self.inner.lock().unwrap();
+        inner.state = None;
+        inner.dirty = true;
     }
 
-    /// 当前是否有有效锚点
+    /// 当前是否有有效原点。
     pub fn is_ready(&self) -> bool {
-        self.state.lock().unwrap().is_some()
+        self.inner.lock().unwrap().state.is_some()
     }
 
-    /// 启动 UDP 响应线程。
-    /// 收到任意数据包后，回复最新锚点 JSON（或 not_found）。
-    /// 调用一次即可，整个 App 生命周期常驻。
-    pub fn start_responder(&self) {
-        let state = self.state.clone();
-
-        thread::spawn(move || {
-            let socket = match UdpSocket::bind(format!("0.0.0.0:{ANCHOR_SERVICE_PORT}")) {
-                Ok(s) => s,
-                Err(e) => {
-                    warn!("AnchorService: failed to bind UDP :{ANCHOR_SERVICE_PORT} — {e}");
-                    return;
-                }
-            };
-
-            info!("AnchorService: responder ready on UDP :{ANCHOR_SERVICE_PORT}");
-
-            let mut buf = [0u8; 256];
-            loop {
-                let (_, sender) = match socket.recv_from(&mut buf) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!("AnchorService: recv error: {e}");
-                        continue;
-                    }
-                };
-
-                let json = {
-                    let lock = state.lock().unwrap();
-                    match &*lock {
-                        Some(anchor) => build_response(anchor),
-                        None => r#"{"version":1,"status":"not_found"}"#.to_string(),
-                    }
-                };
-
-                match socket.send_to(json.as_bytes(), sender) {
-                    Ok(_) => info!("AnchorService: responded to {sender}"),
-                    Err(e) => warn!("AnchorService: send failed to {sender}: {e}"),
-                }
-            }
-        });
+    /// 标记为待推送（新连接建立时调用，使已有原点重新推给新的 PC）。
+    pub fn mark_dirty(&self) {
+        self.inner.lock().unwrap().dirty = true;
     }
-}
 
-// --------------------------------------------------------------------------
-// JSON 序列化
-// --------------------------------------------------------------------------
-
-#[derive(Serialize)]
-struct PositionData {
-    x: f32,
-    y: f32,
-    z: f32,
-}
-
-#[derive(Serialize)]
-struct OrientationData {
-    x: f32,
-    y: f32,
-    z: f32,
-    w: f32,
-}
-
-#[derive(Serialize)]
-struct AnchorResponse<'a> {
-    version: u32,
-    status: &'static str,
-    uuid: &'a str,
-    coordinate_system: &'static str,
-    position: PositionData,
-    orientation: OrientationData,
-}
-
-fn build_response(anchor: &AnchorState) -> String {
-    // 单位约定：输出边界一律转 cm（内部坐标链用米）。旋转四元数无单位。
-    const M_TO_CM: f32 = 100.0;
-    let resp = AnchorResponse {
-        version: 1,
-        status: "ready",
-        uuid: &anchor.uuid,
-        coordinate_system: "OpenXR_STAGE_RightHand_Yup_cm",
-        position: PositionData {
-            x: anchor.pose.position.x * M_TO_CM,
-            y: anchor.pose.position.y * M_TO_CM,
-            z: anchor.pose.position.z * M_TO_CM,
-        },
-        orientation: OrientationData {
-            x: anchor.pose.orientation.x,
-            y: anchor.pose.orientation.y,
-            z: anchor.pose.orientation.z,
-            w: anchor.pose.orientation.w,
-        },
-    };
-    serde_json::to_string(&resp).unwrap_or_else(|e| {
-        warn!("AnchorService: serialize failed: {e}");
-        r#"{"version":1,"status":"error"}"#.to_string()
-    })
+    /// 若有未推送的原点变化则取出（并清除 dirty）。返回 `Some` 表示需要推送该原点。
+    /// 清除态（state=None）不推送，PC 端保留上一次结果。
+    pub fn take_pending(&self) -> Option<AnchorState> {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.dirty {
+            inner.dirty = false;
+            inner.state.clone()
+        } else {
+            None
+        }
+    }
 }
